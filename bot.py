@@ -95,7 +95,14 @@ async def process_sun(message: types.Message, state: FSMContext):
 async def process_water(message: types.Message, state: FSMContext):
     lang = get_lang(message)
     await state.update_data(watering=message.text)
-    await message.answer(TEXTS[lang]['photo_q'], reply_markup=types.ReplyKeyboardRemove())
+    await message.answer(TEXTS[lang]['region_q'], reply_markup=types.ReplyKeyboardRemove())
+    await state.set_state(AgroForm.region)
+
+@dp.message(AgroForm.region)
+async def process_region(message: types.Message, state: FSMContext):
+    lang = get_lang(message)
+    await state.update_data(region=message.text)
+    await message.answer(TEXTS[lang]['photo_q'])
     await state.set_state(AgroForm.photo)
 
 @dp.message(AgroForm.photo, F.photo)
@@ -106,11 +113,16 @@ async def process_photo(message: types.Message, state: FSMContext):
 
     # 1. Текстовий аналіз через Pollinations
     analysis_prompt = (
-        f"User has {data['soil']} soil, {data['sun']} lighting, and {data['watering']} watering. "
-        f"Suggest 5 specific plants for this garden. Output in {lang} language."
+        f"You are a professional botanist and landscape designer. "
+        f"The user is in {data['region']}. Soil: {data['soil']}, Light: {data['sun']}, Watering: {data['watering']}. "
+        f"Suggest 5 REAL, non-fictional plants that thrive in this specific climate and conditions. "
+        f"Format your response as a clean HTML list (use <b> and <i> tags if needed, no markdown asterisks). "
+        f"Don't use characters like '*'. Descriptions should be professional. Language: {lang}. "
+        f"At the very end, add EXACTLY this line: PROMPT: followed by 3-5 English keywords for a garden design with these plants."
     )
     
-    analysis = "Не вдалося отримати аналіз."
+    analysis_text = analysis_full
+    image_keywords = "beautiful landscape garden"
     try:
         async with aiohttp.ClientSession() as session:
             text_api_url = "https://text.pollinations.ai/"
@@ -121,38 +133,51 @@ async def process_photo(message: types.Message, state: FSMContext):
             }
             async with session.post(text_api_url, json=payload, timeout=30) as resp:
                 if resp.status == 200:
-                    analysis = await resp.text()
+                    analysis_full = await resp.text()
+                    # Витягуємо англійський промпт
+                    if "PROMPT:" in analysis_full:
+                        parts = analysis_full.split("PROMPT:")
+                        # Очищаємо текст від зірочок, якщо ШІ їх все одно додав
+                        analysis_text = parts[0].replace('*', '').strip()
+                        image_keywords = parts[1].strip()
+                    else:
+                        analysis_text = analysis_full.replace('*', '').strip()
     except Exception as e:
         print(f"Text AI Error: {e}")
 
-    await status_msg.edit_text(TEXTS[lang]['result_text'].format(analysis=analysis))
+    await status_msg.edit_text(TEXTS[lang]['result_text'].format(analysis=analysis_text), parse_mode="HTML")
 
-    # 2. Генерація картинки
-    # Очищаємо промпт
-    clean_plants = re.sub(r'[*#\-_>\(\)]', ' ', analysis[:300])
-    clean_plants = " ".join(clean_plants.split())
-    
-    img_prompt = f"Professional landscape garden design with these plants: {clean_plants}. Photorealistic, 4k, cinematic lighting."
+    # 2. Генерація картинки (із спробами)
+    img_prompt = f"Professional landscape garden design, {image_keywords}, photorealistic, 4k."
     safe_prompt = quote(img_prompt)
     
-    image_url = f"https://image.pollinations.ai/prompt/{safe_prompt}?model=flux&width=1024&height=1024&nologo=true"
+    # Використовуємо більш стабільну модель за замовчуванням
+    image_url = f"https://image.pollinations.ai/prompt/{safe_prompt}?width=1024&height=1024&nologo=true"
     if POLLINATIONS_KEY:
         image_url += f"&key={POLLINATIONS_KEY}"
 
-    try:
-        timeout = aiohttp.ClientTimeout(total=70)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(image_url) as response:
-                if response.status == 200:
-                    image_data = await response.read()
-                    photo = BufferedInputFile(image_data, filename="design.jpg")
-                    await message.answer_photo(photo=photo, caption="✨ Твій персональний дизайн")
-                else:
-                    await message.answer("❌ Сервер генерації зображень перевантажений. Спробуйте пізніше.")
-    except Exception as e:
-        print(f"Image Error: {e}")
-        await message.answer("❌ Виникла помилка при генерації фото.")
-    
+    for attempt in range(2): # 2 спроби
+        try:
+            await bot.send_chat_action(message.chat.id, "upload_photo")
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=40)) as session:
+                async with session.get(image_url) as response:
+                    if response.status == 200:
+                        image_data = await response.read()
+                        photo = BufferedInputFile(image_data, filename="design.jpg")
+                        await message.answer_photo(photo=photo, caption="✨ Твій персональний дизайн")
+                        await state.clear()
+                        return # Успіх!
+                    else:
+                        print(f"Attempt {attempt+1} failed with status {response.status}")
+        except Exception as e:
+            print(f"Attempt {attempt+1} error: {e}")
+        
+        if attempt == 0:
+            # Якщо перша спроба не вдалася, пробуємо простіший промпт
+            image_url = f"https://image.pollinations.ai/prompt/beautiful%20garden%20landscape%20design?width=1024&height=1024&nologo=true"
+            await asyncio.sleep(2) # Пауза перед другою спробою
+
+    await message.answer("❌ На жаль, сервіс малювання зараз дуже зайнятий. Але ваші рекомендації збережено вище! ☝️")
     await state.clear()
 
 # --- ЗАПУСК ---
