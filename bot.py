@@ -150,7 +150,13 @@ async def process_photo(message: types.Message, state: FSMContext):
     except Exception as e:
         print(f"Text AI Error: {e}")
 
-    await status_msg.edit_text(TEXTS[lang]['result_text'].format(analysis=analysis_text), parse_mode="HTML")
+    try:
+        await status_msg.edit_text(TEXTS[lang]['result_text'].format(analysis=analysis_text), parse_mode="HTML")
+    except Exception as e:
+        print(f"HTML Parsing Error: {e}")
+        # Якщо HTML битий, видаляємо теги і шлемо як звичайний текст
+        safe_text = re.sub(r'<[^>]+>', '', analysis_text)
+        await status_msg.edit_text(TEXTS[lang]['result_text'].format(analysis=safe_text))
 
     # 2. Генерація картинки (із спробами)
     img_prompt = f"Professional landscape garden design, {image_keywords}, photorealistic, 4k."
