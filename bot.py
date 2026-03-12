@@ -1,6 +1,7 @@
-import os
 import asyncio
 import aiohttp
+from aiohttp import web
+import os
 from urllib.parse import quote
 from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, types, F
@@ -9,6 +10,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
+from aiogram.types import BufferedInputFile
 
 # Завантажуємо секрети
 load_dotenv()
@@ -116,14 +118,54 @@ async def process_photo(message: types.Message, state: FSMContext):
     # 2. Генерація картинки на основі отриманого аналізу
     img_prompt = f"Professional landscape garden design with these plants: {analysis[:200]}. Photorealistic, Flux model, 4k."
     safe_prompt = quote(img_prompt)
-    image_url = f"https://image.pollinations.ai/prompt/{safe_prompt}?model=flux&width=1024&height=1024&nologo=true&key={POLLINATIONS_KEY}"
+    
+    # Додаємо ключ тільки якщо він є
+    image_url = f"https://image.pollinations.ai/prompt/{safe_prompt}?model=flux&width=1024&height=1024&nologo=true"
+    if POLLINATIONS_KEY:
+        image_url += f"&key={POLLINATIONS_KEY}"
 
-    await message.answer_photo(photo=image_url, caption="✨ Твій персональний дизайн")
+    try:
+        timeout = aiohttp.ClientTimeout(total=60)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(image_url) as response:
+                if response.status == 200:
+                    image_data = await response.read()
+                    photo = BufferedInputFile(image_data, filename="design.jpg")
+                    await message.answer_photo(photo=photo, caption="✨ Твій персональний дизайн")
+                else:
+                    await message.answer(f"❌ Не вдалося згенерувати фото (Помилка {response.status}). Але ось ваші рекомендації: {analysis[:500]}...")
+    except Exception as e:
+        print(f"Error fetching image: {e}")
+        await message.answer("❌ Виникла помилка при завантаженні зображення.")
+    
     await state.clear()
 
+# Простий веб-сервер для Render (Free Tier Web Service)
+# Він потрібен, щоб Render бачив, що додаток "живий" через відкритий порт
+async def handle_health_check(request):
+    return web.Response(text="Bot is running!")
+
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get("/", handle_health_check)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    # Render передає порт через змінну оточення PORT
+    port = int(os.getenv("PORT", 10000))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    print(f"Web server started on port {port}")
+
 async def main():
-    await dp.start_polling(bot)
+    # Запускаємо веб-сервер та бота одночасно
+    await asyncio.gather(
+        start_web_server(),
+        dp.start_polling(bot)
+    )
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        print("Bot stopped")
     
