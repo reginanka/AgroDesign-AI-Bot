@@ -30,6 +30,7 @@ class AgroForm(StatesGroup):
     soil = State()
     sun = State()
     watering = State()
+    region = State()
     photo = State()
 
 TEXTS = {
@@ -40,9 +41,10 @@ TEXTS = {
         'sun_opts': ["Сонце", "Напівтінь", "Тінь"],
         'water_q': "Як щодо поливу?",
         'water_opts': ["Автоматичний", "Вручну", "Рідко"],
+        'region_q': "Вкажіть ваш регіон або країну (наприклад: Київська обл., Україна) 🌍",
         'photo_q': "Надішліть фото ділянки 📸",
-        'wait': "⏳ ШІ аналізує дані та підбирає рослини...",
-        'result_text': "✅ Рекомендовані рослини:\n\n{analysis}\n\n🎨 Малюю дизайн...",
+        'wait': "⏳ ШІ аналізує дані та підбирає реальні рослини для вашого клімату...",
+        'result_text': "✅ <b>Рекомендовані рослини:</b>\n\n{analysis}\n\n🎨 Малюю дизайн...",
     },
     'en': {
         'start': "🌿 Welcome to AgroDesign AI! What's your soil type?",
@@ -51,9 +53,10 @@ TEXTS = {
         'sun_opts': ["Full Sun", "Partial Shade", "Full Shade"],
         'water_q': "Watering?",
         'water_opts': ["Automatic", "Manual", "Rarely"],
+        'region_q': "Specify your region or country (e.g., London, UK) 🌍",
         'photo_q': "Send a photo of your plot 📸",
-        'wait': "⏳ AI is analyzing data and choosing plants...",
-        'result_text': "✅ Recommended plants:\n\n{analysis}\n\n🎨 Rendering design...",
+        'wait': "⏳ AI is choosing real plants for your climate...",
+        'result_text': "✅ <b>Recommended plants:</b>\n\n{analysis}\n\n🎨 Rendering design...",
     }
 }
 
@@ -114,15 +117,17 @@ async def process_photo(message: types.Message, state: FSMContext):
     # 1. Текстовий аналіз через Pollinations
     analysis_prompt = (
         f"You are a professional botanist and landscape designer. "
-        f"The user is in {data['region']}. Soil: {data['soil']}, Light: {data['sun']}, Watering: {data['watering']}. "
+        f"The user is in {data.get('region', 'Unknown region')}. Soil: {data.get('soil', 'Unknown')}, Light: {data.get('sun', 'Unknown')}, Watering: {data.get('watering', 'Unknown')}. "
         f"Suggest 5 REAL, non-fictional plants that thrive in this specific climate and conditions. "
         f"Format your response as a clean HTML list (use <b> and <i> tags if needed, no markdown asterisks). "
         f"Don't use characters like '*'. Descriptions should be professional. Language: {lang}. "
         f"At the very end, add EXACTLY this line: PROMPT: followed by 3-5 English keywords for a garden design with these plants."
     )
     
-    analysis_text = analysis_full
+    analysis_full = "Не вдалося отримати аналіз."
+    analysis_text = "Не вдалося отримати аналіз."
     image_keywords = "beautiful landscape garden"
+    
     try:
         async with aiohttp.ClientSession() as session:
             text_api_url = "https://text.pollinations.ai/"
