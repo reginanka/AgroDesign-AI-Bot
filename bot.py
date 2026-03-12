@@ -1,6 +1,7 @@
 import os
 import asyncio
 import aiohttp
+from urllib.parse import quote
 from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
@@ -93,29 +94,29 @@ async def process_photo(message: types.Message, state: FSMContext):
     data = await state.get_data()
     status_msg = await message.answer(TEXTS[lang]['wait'])
 
-    # 1. Текстовий аналіз через Pollinations (Claude/Llama)
+    # 1. Текстовий аналіз через Pollinations (отримуємо назви рослин)
     analysis_prompt = (
         f"User has {data['soil']} soil, {data['sun']} lighting, and {data['watering']} watering. "
         f"Suggest 5 specific plants for this garden. Output in {lang} language."
     )
     
     async with aiohttp.ClientSession() as session:
-        # Запит до текстової моделі
-        text_api_url = f"https://text.pollinations.ai/"
+        text_api_url = "https://text.pollinations.ai/"
         payload = {
             "messages": [{"role": "user", "content": analysis_prompt}],
-            "model": "openai-large", # або інша доступна модель
+            "model": "openai-large",
             "key": POLLINATIONS_KEY
         }
         async with session.post(text_api_url, json=payload) as resp:
             analysis = await resp.text()
 
+    # Оновлюємо статусне повідомлення з текстом від ШІ
     await status_msg.edit_text(TEXTS[lang]['result_text'].format(analysis=analysis))
 
-    # 2. Генерація картинки на основі аналізу
+    # 2. Генерація картинки на основі отриманого аналізу
     img_prompt = f"Professional landscape garden design with these plants: {analysis[:200]}. Photorealistic, Flux model, 4k."
-    encoded_img_prompt = img_prompt.replace(" ", "%20")
-    image_url = f"https://image.pollinations.ai/prompt/{encoded_img_prompt}?model=flux&width=1024&height=1024&nologo=true&key={POLLINATIONS_KEY}"
+    safe_prompt = quote(img_prompt)
+    image_url = f"https://image.pollinations.ai/prompt/{safe_prompt}?model=flux&width=1024&height=1024&nologo=true&key={POLLINATIONS_KEY}"
 
     await message.answer_photo(photo=image_url, caption="✨ Твій персональний дизайн")
     await state.clear()
@@ -125,4 +126,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-  
+    
