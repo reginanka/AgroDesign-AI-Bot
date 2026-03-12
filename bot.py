@@ -2,6 +2,7 @@ import asyncio
 import aiohttp
 from aiohttp import web
 import os
+import re
 from urllib.parse import quote
 from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, types, F
@@ -115,8 +116,13 @@ async def process_photo(message: types.Message, state: FSMContext):
     # Оновлюємо статусне повідомлення з текстом від ШІ
     await status_msg.edit_text(TEXTS[lang]['result_text'].format(analysis=analysis))
 
-    # 2. Генерація картинки на основі отриманого аналізу
-    img_prompt = f"Professional landscape garden design with these plants: {analysis[:200]}. Photorealistic, Flux model, 4k."
+    # 2. Генерація картинки
+    # Очищаємо текст від маркдауну та зайвих символів для стабільної роботи Image API
+    clean_plants = re.sub(r'[*#\-_>\(\)]', '', analysis[:300])
+    # Видаляємо зайві пробіли та переноси рядків
+    clean_plants = " ".join(clean_plants.split())
+    
+    img_prompt = f"Beautiful landscape garden design, style of professional gardening magazine. Plants: {clean_plants}. High quality, photorealistic, cinematic lighting."
     safe_prompt = quote(img_prompt)
     
     # Додаємо ключ тільки якщо він є
