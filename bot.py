@@ -163,6 +163,8 @@ async def start_web_server():
     print(f"Web server started on port {port}")
 
 async def main():
+    # Видаляємо вебхук (якщо був) та очищуємо чергу повідомлень для уникнення конфліктів
+    await bot.delete_webhook(drop_pending_updates=True)
     # Запускаємо веб-сервер та бота одночасно
     await asyncio.gather(
         start_web_server(),
