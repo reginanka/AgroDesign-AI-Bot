@@ -104,7 +104,7 @@ async def process_photo(message: types.Message, state: FSMContext):
         text_api_url = "https://text.pollinations.ai/"
         payload = {
             "messages": [{"role": "user", "content": analysis_prompt}],
-            "model": "openai-large",
+            "model": "openai",
             "key": POLLINATIONS_KEY
         }
         async with session.post(text_api_url, json=payload) as resp:
