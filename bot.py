@@ -114,50 +114,53 @@ async def process_photo(message: types.Message, state: FSMContext):
     data = await state.get_data()
     status_msg = await message.answer(TEXTS[lang]['wait'])
 
-    # 1. Текстовий аналіз через Pollinations
+    # 1. Текстовий аналіз через Pollinations (з запасним варіантом)
     analysis_prompt = (
-        f"Ти — професійний ботанік та ландшафтний дизайнер. "
-        f"Користувач знаходиться в регіоні: {data.get('region', 'Україна')}. "
-        f"Умови: ґрунт {data.get('soil')}, освітлення {data.get('sun')}, полив {data.get('watering')}. "
-        f"Запропонуй 5 РЕАЛЬНИХ садових рослин (дерева, кущі або квіти), які гарантовано виживуть у цьому кліматі. "
-        f"ВАЖЛИВО: Пиши виключно грамотною, живою українською мовою. "
-        f"Уникай кальки з англійської (наприклад, замість 'зимова тваринність' пиши 'зимостійкість'). "
-        f"Не вигадуй назви. Опис має бути коротким, але професійним. "
-        f"Форматуй як чистий список з булітами '•', використовуй <b> для назв. "
-        f"В самому кінці повідомлення додай ОДИН рядок: PROMPT: та 3-5 англійських слів для візуалізації цього саду."
+        f"Ти — експерт-ботанік. Користувач у регіоні {data.get('region', 'Україна')}. "
+        f"Ґрунт: {data.get('soil')}, Світло: {data.get('sun')}, Полив: {data.get('watering')}. "
+        f"Запропонуй 5 реальних садових рослин для цих умов. "
+        f"Пиши виключно природною, професійною українською мовою без помилок і кальки. "
+        f"Форматуй як список з булітами '•', назви виділяй <b>. "
+        f"В кінці ОДИН рядок: PROMPT: та 3-5 англійських слів стилю саду."
     )
     
-    analysis_full = "Не вдалося отримати аналіз."
     analysis_text = "Не вдалося отримати аналіз."
     image_keywords = "beautiful landscape garden"
     
-    try:
-        async with aiohttp.ClientSession() as session:
-            text_api_url = "https://text.pollinations.ai/"
-            payload = {
-                "messages": [{"role": "user", "content": analysis_prompt}],
-                "model": "gemini-fast", # Використовуємо потужнішу модель для української мови
-                "key": POLLINATIONS_KEY
-            }
-            async with session.post(text_api_url, json=payload, timeout=30) as resp:
-                if resp.status == 200:
-                    analysis_full = await resp.text()
-                    # Витягуємо англійський промпт
-                    if "PROMPT:" in analysis_full:
-                        parts = analysis_full.split("PROMPT:")
-                        # Очищаємо текст від зірочок, якщо ШІ їх все одно додав
-                        analysis_text = parts[0].replace('*', '').strip()
-                        image_keywords = parts[1].strip()
+    # Список моделей для спроби (якщо одна лежить, пробуємо іншу)
+    models_to_try = ["gemini-fast", "mistral-large", "openai"]
+    
+    async with aiohttp.ClientSession() as session:
+        for model_name in models_to_try:
+            try:
+                print(f"Trying text model: {model_name}...")
+                text_api_url = "https://text.pollinations.ai/"
+                payload = {
+                    "messages": [{"role": "user", "content": analysis_prompt}],
+                    "model": model_name,
+                    "key": POLLINATIONS_KEY
+                }
+                async with session.post(text_api_url, json=payload, timeout=25) as resp:
+                    if resp.status == 200:
+                        full_resp = await resp.text()
+                        if "PROMPT:" in full_resp:
+                            parts = full_resp.split("PROMPT:")
+                            analysis_text = parts[0].replace('*', '').strip()
+                            image_keywords = parts[1].strip()
+                        else:
+                            analysis_text = full_resp.replace('*', '').strip()
+                        print(f"Success with model: {model_name}")
+                        break
                     else:
-                        analysis_text = analysis_full.replace('*', '').strip()
-    except Exception as e:
-        print(f"Text AI Error: {e}")
+                        print(f"Model {model_name} returned status {resp.status}")
+            except Exception as e:
+                print(f"Error with model {model_name}: {e}")
+                continue
 
+    # Оновлюємо статус (якщо зовсім нічого не вийшло, залишиться текст помилки)
     try:
         await status_msg.edit_text(TEXTS[lang]['result_text'].format(analysis=analysis_text), parse_mode="HTML")
     except Exception as e:
-        print(f"HTML Parsing Error: {e}")
-        # Якщо HTML битий, видаляємо теги і шлемо як звичайний текст
         safe_text = re.sub(r'<[^>]+>', '', analysis_text)
         await status_msg.edit_text(TEXTS[lang]['result_text'].format(analysis=safe_text))
 
