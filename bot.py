@@ -306,7 +306,10 @@ async def on_startup(bot: Bot, *args, **kwargs):
     await bot.set_my_commands(commands)
     
     if RENDER_URL:
+        # ПРИМУСОВЕ СКИНУТИ СТАРІ НАЛАШТУВАННЯ ТА ЧЕРГУ
+        await bot.delete_webhook(drop_pending_updates=True)
         await bot.set_webhook(f"{RENDER_URL}/webhook", drop_pending_updates=True)
+        print(f"✅ Webhook successfully set to: {RENDER_URL}/webhook")
 
 def main():
     if RENDER_URL:
