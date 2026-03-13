@@ -12,7 +12,9 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
-from aiogram.types import Message
+from aiogram.types import Message, BufferedInputFile
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+from aiohttp import web
 
 # --- НАЛАШТУВАННЯ ---
 load_dotenv()
@@ -67,7 +69,7 @@ TEXTS = {
 def get_lang(message: Message):
     return 'uk' if message.from_user.language_code == 'uk' else 'en'
 
-# --- ОБРОБНИКИ ДАНИХ ---
+# --- ОБРОБНИКИ FLOW ---
 
 @dp.message(Command("start"))
 async def cmd_start(message: Message, state: FSMContext):
@@ -143,26 +145,27 @@ async def process_photo(message: Message, state: FSMContext):
     await status_msg.edit_text(TEXTS[lang]['result_text'].format(analysis=analysis_text), parse_mode="HTML")
     await state.update_data(last_analysis=analysis_text)
     
-    # 2. Миттєве малювання
+    # 2. Швидке малювання (метод Z-Image Turbo)
     await message.answer(TEXTS[lang]['generating_img'])
     clean_kw = re.sub(r'[^a-zA-Z0-9\s]', '', img_kw)
     seed = random.randint(1, 99999)
-    # Пряме посилання Телеграму - найшвидший метод
-    img_url = f"https://image.pollinations.ai/prompt/landscape%20garden%20design%20{quote(clean_kw)}?width=1024&height=1024&nologo=true&seed={seed}&model=flux"
+    # Використовуємо турбо модель для миттєвого результату
+    img_url = f"https://image.pollinations.ai/prompt/landscape%20garden%20design%20{quote(clean_kw)}?width=1024&height=1024&nologo=true&seed={seed}&model=turbo"
     
     try:
-        await message.answer_photo(photo=img_url, caption="✨ Ось ваш візуальний проект саду")
+        # Надсилаємо як посилання, щоб Телеграм сам завантажив - це найшвидше
+        await message.answer_photo(photo=img_url, caption="✨ Твій персональний садовий дизайн")
     except:
         await message.answer(TEXTS[lang]['img_error'])
 
-    await message.answer("💬 Ви можете написати мені, щоб змінити щось у проекті!")
+    await message.answer("💬 Ви можете написати мені, щоб змінити щось у проекті або запитати про рослини!")
     await state.set_state(AgroForm.chat)
 
 @dp.message(AgroForm.chat)
 async def chat_handler(message: Message, state: FSMContext):
     data = await state.get_data()
     prompt = (
-        f"Ти ландшафтний архітектор. Умови: {data.get('region')}, {data.get('soil')}. "
+        f"Ти архітектор. Умови: {data.get('region')}, {data.get('soil')}. "
         f"Минуле: {data.get('last_analysis')}. Питання: {message.text}. "
         f"Відповідай коротко українською."
     )
@@ -174,7 +177,7 @@ async def chat_handler(message: Message, state: FSMContext):
                 ans = (await r.json())['choices'][0]['message']['content']
                 await message.answer(ans, parse_mode="HTML")
                 await state.update_data(last_analysis=ans)
-    except: await message.answer("Сервіс тимчасово недоступний.")
+    except: await message.answer("Сервіс тимчасово недоступний для чату.")
 
 # --- СТАРТ ---
 
@@ -186,17 +189,24 @@ async def on_startup(bot: Bot):
 
 def main():
     if RENDER_URL:
+        # Режим Webhook для Render
         app = web.Application()
-        SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path="/webhook")
+        webhook_requests_handler = SimpleRequestHandler(dispatcher=dp, bot=bot)
+        webhook_requests_handler.register(app, path="/webhook")
         setup_application(app, dp, bot=bot)
+        
+        # Реєструємо функцію запуску
         dp.startup.register(on_startup)
+        
+        print(f"Starting Webhook on port {PORT}")
         web.run_app(app, host="0.0.0.0", port=PORT)
     else:
+        # Режим Polling
         async def run_poll():
             await on_startup(bot)
             await dp.start_polling(bot)
+        print("Starting Polling...")
         asyncio.run(run_poll())
 
 if __name__ == "__main__":
     main()
-
