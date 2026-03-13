@@ -114,55 +114,56 @@ async def process_photo(message: types.Message, state: FSMContext):
     data = await state.get_data()
     status_msg = await message.answer(TEXTS[lang]['wait'])
 
-    # 1. Текстовий аналіз через Pollinations (Екстремально надійний метод)
+    # 1. Текстовий аналіз через НОВИЙ API Pollinations (v1/chat/completions)
     analysis_prompt = (
-        f"Professional botanist advice for {data.get('region', 'Ukraine')}. "
-        f"Soil: {data.get('soil')}, Sun: {data.get('sun')}, Water: {data.get('watering')}. "
-        f"List 5 REAL plants in UKRAINIAN language only. Professional style. "
-        f"End with PROMPT: and 3-5 English garden keywords."
+        f"Ти — експерт-ботанік. Користувач у регіоні {data.get('region', 'Україна')}. "
+        f"Ґрунт: {data.get('soil')}, Світло: {data.get('sun')}, Полив: {data.get('watering')}. "
+        f"Запропонуй 5 реальних садових рослин для цих умов. "
+        f"Пиши виключно природною українською мовою. "
+        f"Форматуй як список з булітами '•', назви виділяй <b>. "
+        f"В кінці ОДИН рядок: PROMPT: та 3-5 англійських слів для візуалізації."
     )
     
-    analysis_text = "Не вдалося отримати аналіз. Можливо, сервіс перевантажений. Спробуйте ще раз через хвилину."
-    image_keywords = "beautiful garden design"
+    analysis_text = "Сервіс аналізу зараз оновлюється. Спробуйте ще раз за хвилину."
+    image_keywords = "beautiful landscape garden"
     
-    # Використовуємо найнадійніші моделі за твоїм монітором
-    models_to_try = [
-        "qwen-character", # №1 на моніторі (100% успіх, 0.8с)
-        "gemini-fast",   # №2 на моніторі
-        "openai"         # Запасний варіант
-    ]
+    # Використовуємо стабільні моделі для нового API
+    models_to_try = ["openai", "mistral-large"]
     
     async with aiohttp.ClientSession() as session:
         for model in models_to_try:
             try:
-                print(f"Trying model: {model}...")
-                # Використовуємо простий GET запит, він працює навіть коли POST "лежить"
-                encoded_prompt = quote(analysis_prompt)
-                text_url = f"https://text.pollinations.ai/{encoded_prompt}?model={model}&seed=42"
+                print(f"Trying new API with model: {model}...")
+                new_api_url = "https://text.pollinations.ai/v1/chat/completions"
+                headers = {"Authorization": f"Bearer {POLLINATIONS_KEY}"} if POLLINATIONS_KEY else {}
+                payload = {
+                    "model": model,
+                    "messages": [{"role": "user", "content": analysis_prompt}],
+                    "temperature": 0.7
+                }
                 
-                async with session.get(text_url, timeout=20) as resp:
+                async with session.post(new_api_url, json=payload, headers=headers, timeout=30) as resp:
                     if resp.status == 200:
-                        full_resp = await resp.text()
-                        if len(full_resp) > 10: # Перевірка чи відповідь не пуста
-                            if "PROMPT:" in full_resp:
-                                parts = full_resp.split("PROMPT:")
-                                analysis_text = parts[0].replace('*', '').strip()
-                                image_keywords = parts[1].strip()
-                            else:
-                                analysis_text = full_resp.replace('*', '').strip()
-                            print(f"SUCCESS with {model}!")
-                            break
+                        json_resp = await resp.json()
+                        full_resp = json_resp['choices'][0]['message']['content']
+                        if "PROMPT:" in full_resp:
+                            parts = full_resp.split("PROMPT:")
+                            analysis_text = parts[0].replace('*', '').strip()
+                            image_keywords = parts[1].strip()
+                        else:
+                            analysis_text = full_resp.replace('*', '').strip()
+                        print(f"SUCCESS with {model} on NEW API!")
+                        break
                     else:
-                        print(f"Model {model} failed with status {resp.status}")
+                        print(f"New API failed with status {resp.status}")
             except Exception as e:
-                print(f"Model {model} error: {e}")
+                print(f"New API error with {model}: {e}")
                 continue
 
     # Відправляємо результат
     try:
         await status_msg.edit_text(TEXTS[lang]['result_text'].format(analysis=analysis_text), parse_mode="HTML")
     except Exception:
-        # Якщо HTML битий (наприклад, ШІ вставив криві теги), шлемо без форматування
         clean_text = re.sub(r'<[^>]+>', '', analysis_text)
         await status_msg.edit_text(TEXTS[lang]['result_text'].format(analysis=clean_text))
 
