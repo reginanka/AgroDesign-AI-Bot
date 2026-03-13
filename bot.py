@@ -38,12 +38,8 @@ class AgroForm(StatesGroup):
 
 AVAILABLE_MODELS = {
     "🎨 Z-Image Turbo": "zimage",
-    "⚡ FLUX Schnell": "flux",
-    "🚀 SDXL Turbo": "turbo",
     "🤖 GPT Image 1 Mini": "gptimage",
-    "💎 Klein (FLUX.2)": "klein",
-    "🌟 Klein Large (9B)": "klein-large",
-    "🎬 Seedance Lite": "seedance"
+    "⚡ FLUX Schnell": "flux"
 }
 
 TEXTS = {
@@ -70,11 +66,14 @@ def get_lang(message: Message):
 
 @dp.message(Command("start"))
 async def cmd_start(message: Message, state: FSMContext):
-    # Встановлюємо модель за замовчуванням, якщо не встановлено
+    # Отримуємо поточну модель перед очищенням
     data = await state.get_data()
-    if not data.get('model'):
-        await state.update_data(model='zimage')
-        
+    current_model = data.get('model', 'zimage')
+    
+    # Очищаємо дані форми, але зберігаємо модель
+    await state.clear()
+    await state.update_data(model=current_model)
+    
     builder = ReplyKeyboardBuilder()
     builder.button(text="🌱 Почати дизайн")
     builder.button(text="🎨 Обрати модель")
@@ -83,10 +82,10 @@ async def cmd_start(message: Message, state: FSMContext):
     await message.answer(
         "🌿 Вітаю в AgroDesign AI!\n\n"
         "Я допоможу створити професійний дизайн вашого саду.\n"
-        "Скористайтеся меню нижче 👇",
-        reply_markup=builder.as_markup(resize_keyboard=True)
+        "Обрана модель: <b>" + [n for n, m in AVAILABLE_MODELS.items() if m == current_model][0] + "</b>",
+        reply_markup=builder.as_markup(resize_keyboard=True),
+        parse_mode="HTML"
     )
-    await state.clear() # Скидаємо стан для нового початку
 
 @dp.message(F.text == "🌱 Почати дизайн")
 async def start_design(message: Message, state: FSMContext):
@@ -110,8 +109,25 @@ async def process_model_select(callback: types.CallbackQuery, state: FSMContext)
     model_id = callback.data.split(":")[1]
     await state.update_data(model=model_id)
     model_name = [n for n, m in AVAILABLE_MODELS.items() if m == model_id][0]
+    
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Почати дизайн з цією моделлю", callback_data="start_flow")
+    
     await callback.answer(f"Вибрано: {model_name}")
-    await callback.message.edit_text(f"✅ Тепер я буду малювати сади через: <b>{model_name}</b>", parse_mode="HTML")
+    await callback.message.edit_text(
+        f"✅ Тепер я буду малювати сади через: <b>{model_name}</b>\n\nТепер ви можете почати створення дизайну!",
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML"
+    )
+
+@dp.callback_query(F.data == "start_flow")
+async def start_flow_callback(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.delete()
+    builder = ReplyKeyboardBuilder()
+    for opt in TEXTS['uk']['soil_opts']: builder.button(text=opt)
+    await callback.message.answer(TEXTS['uk']['start'], reply_markup=builder.as_markup(resize_keyboard=True))
+    await state.set_state(AgroForm.soil)
 
 @dp.message(AgroForm.soil)
 async def process_soil(message: Message, state: FSMContext):
@@ -206,19 +222,15 @@ async def process_photo(message: Message, state: FSMContext):
         from aiogram.utils.keyboard import InlineKeyboardBuilder
         builder = InlineKeyboardBuilder()
         
-        # Основні швидкі варіанти
-        builder.button(text="🚀 SDXL Turbo", callback_data="regen:turbo")
+        # Кнопки для швидкого перемикання між обраними моделями
+        builder.button(text="🎨 Z-Image", callback_data="regen:zimage")
+        builder.button(text="🤖 GPT-Img", callback_data="regen:gptimage")
         builder.button(text="⚡ FLUX", callback_data="regen:flux")
-        builder.button(text="🌟 Klein Large", callback_data="regen:klein-large")
-        builder.button(text="🎬 Video (Seedance)", callback_data="regen:seedance")
+        builder.adjust(3)
         
-        builder.adjust(2)
-        
-        await message.answer_photo(
-            photo=img_url, 
-            caption=f"✨ Ваш візуальний проект (модель: {current_model})\n\nМожете спробувати іншу модель нижче 👇",
-            reply_markup=builder.as_markup()
-        )
+        caption = f"✨ Ваш візуальний проект (модель: {current_model})\n\nМожете змінити модель нижче 👇"
+        await message.answer_photo(photo=img_url, caption=caption, reply_markup=builder.as_markup())
+            
     except Exception as e:
         print(f"Image Error: {e}")
         # Спробуємо надіслати повідомлення, що обрана модель може бути недоступна
@@ -253,10 +265,8 @@ async def process_regen(callback: types.CallbackQuery, state: FSMContext):
         img_url += f"&key={POLLINATIONS_KEY}"
         
     try:
-        await callback.message.answer_photo(
-            photo=img_url, 
-            caption=f"✨ Новий варіант (модель: {model_id})"
-        )
+        caption = f"✨ Новий варіант (модель: {model_id})"
+        await callback.message.answer_photo(photo=img_url, caption=caption)
         await callback.answer()
     except Exception as e:
         print(f"Regen Error: {e}")
