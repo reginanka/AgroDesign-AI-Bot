@@ -37,10 +37,13 @@ class AgroForm(StatesGroup):
     model = State()
 
 AVAILABLE_MODELS = {
-    "🚀 Turbo": "turbo",
-    "🎨 Z-Image": "zimage",
-    "✨ Flux": "flux",
-    "🤖 GPT": "gptimage"
+    "🎨 Z-Image Turbo": "zimage",
+    "⚡ FLUX Schnell": "flux",
+    "🚀 SDXL Turbo": "turbo",
+    "🤖 GPT Image 1 Mini": "gptimage",
+    "💎 Klein (FLUX.2)": "klein",
+    "🌟 Klein Large (9B)": "klein-large",
+    "🎬 Seedance Lite": "seedance"
 }
 
 TEXTS = {
@@ -73,10 +76,26 @@ async def cmd_start(message: Message, state: FSMContext):
         await state.update_data(model='zimage')
         
     builder = ReplyKeyboardBuilder()
+    builder.button(text="🌱 Почати дизайн")
+    builder.button(text="🎨 Обрати модель")
+    builder.adjust(2)
+    
+    await message.answer(
+        "🌿 Вітаю в AgroDesign AI!\n\n"
+        "Я допоможу створити професійний дизайн вашого саду.\n"
+        "Скористайтеся меню нижче 👇",
+        reply_markup=builder.as_markup(resize_keyboard=True)
+    )
+    await state.clear() # Скидаємо стан для нового початку
+
+@dp.message(F.text == "🌱 Почати дизайн")
+async def start_design(message: Message, state: FSMContext):
+    builder = ReplyKeyboardBuilder()
     for opt in TEXTS['uk']['soil_opts']: builder.button(text=opt)
-    await message.answer(TEXTS['uk']['start'] + "\n\n(Також ви можете змінити модель через /model)", reply_markup=builder.as_markup(resize_keyboard=True))
+    await message.answer(TEXTS['uk']['start'], reply_markup=builder.as_markup(resize_keyboard=True))
     await state.set_state(AgroForm.soil)
 
+@dp.message(F.text == "🎨 Обрати модель")
 @dp.message(Command("model"))
 async def cmd_model(message: Message):
     from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -186,13 +205,18 @@ async def process_photo(message: Message, state: FSMContext):
         await state.update_data(last_img_kw=clean_kw)
         from aiogram.utils.keyboard import InlineKeyboardBuilder
         builder = InlineKeyboardBuilder()
-        builder.button(text="🔄 Спробувати Turbo", callback_data="regen:turbo")
-        builder.button(text="✨ Спробувати Flux", callback_data="regen:flux")
+        
+        # Основні швидкі варіанти
+        builder.button(text="🚀 SDXL Turbo", callback_data="regen:turbo")
+        builder.button(text="⚡ FLUX", callback_data="regen:flux")
+        builder.button(text="🌟 Klein Large", callback_data="regen:klein-large")
+        builder.button(text="🎬 Video (Seedance)", callback_data="regen:seedance")
+        
         builder.adjust(2)
         
         await message.answer_photo(
             photo=img_url, 
-            caption=f"✨ Ваш візуальний проект (модель: {current_model})",
+            caption=f"✨ Ваш візуальний проект (модель: {current_model})\n\nМожете спробувати іншу модель нижче 👇",
             reply_markup=builder.as_markup()
         )
     except Exception as e:
@@ -264,6 +288,13 @@ async def chat_handler(message: Message, state: FSMContext):
 # --- ЗАПУСК ---
 
 async def on_startup(bot: Bot, *args, **kwargs):
+    # Налаштуємо меню команд (кнопка "Menu" біля поля вводу)
+    commands = [
+        types.BotCommand(command="start", description="Запустити бота / Почати спочатку"),
+        types.BotCommand(command="model", description="Змінити модель малювання")
+    ]
+    await bot.set_my_commands(commands)
+    
     if RENDER_URL:
         await bot.set_webhook(f"{RENDER_URL}/webhook", drop_pending_updates=True)
 
