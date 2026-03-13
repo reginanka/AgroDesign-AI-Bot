@@ -34,6 +34,14 @@ class AgroForm(StatesGroup):
     region = State()
     photo = State()
     chat = State()
+    model = State()
+
+AVAILABLE_MODELS = {
+    "🚀 Turbo": "turbo",
+    "🎨 Z-Image": "zimage",
+    "✨ Flux": "flux",
+    "🤖 GPT": "gptimage"
+}
 
 TEXTS = {
     'uk': {
@@ -59,10 +67,32 @@ def get_lang(message: Message):
 
 @dp.message(Command("start"))
 async def cmd_start(message: Message, state: FSMContext):
+    # Встановлюємо модель за замовчуванням, якщо не встановлено
+    data = await state.get_data()
+    if not data.get('model'):
+        await state.update_data(model='zimage')
+        
     builder = ReplyKeyboardBuilder()
     for opt in TEXTS['uk']['soil_opts']: builder.button(text=opt)
-    await message.answer(TEXTS['uk']['start'], reply_markup=builder.as_markup(resize_keyboard=True))
+    await message.answer(TEXTS['uk']['start'] + "\n\n(Також ви можете змінити модель через /model)", reply_markup=builder.as_markup(resize_keyboard=True))
     await state.set_state(AgroForm.soil)
+
+@dp.message(Command("model"))
+async def cmd_model(message: Message):
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    builder = InlineKeyboardBuilder()
+    for name, m_id in AVAILABLE_MODELS.items():
+        builder.button(text=name, callback_data=f"set_model:{m_id}")
+    builder.adjust(2)
+    await message.answer("Оберіть модель для генерації зображень:", reply_markup=builder.as_markup())
+
+@dp.callback_query(F.data.startswith("set_model:"))
+async def process_model_select(callback: types.CallbackQuery, state: FSMContext):
+    model_id = callback.data.split(":")[1]
+    await state.update_data(model=model_id)
+    model_name = [n for n, m in AVAILABLE_MODELS.items() if m == model_id][0]
+    await callback.answer(f"Вибрано: {model_name}")
+    await callback.message.edit_text(f"✅ Тепер я буду малювати сади через: <b>{model_name}</b>", parse_mode="HTML")
 
 @dp.message(AgroForm.soil)
 async def process_soil(message: Message, state: FSMContext):
@@ -139,11 +169,12 @@ async def process_photo(message: Message, state: FSMContext):
     await message.answer(TEXTS['uk']['generating_img'])
     clean_kw = re.sub(r'[^a-zA-Z0-9\s]', '', img_kw)
     seed = random.randint(1, 999999)
+    current_model = data.get('model', 'zimage')
     
     # Пряме посилання з ключем у параметрах (для платного доступу)
     img_url = (
         f"https://gen.pollinations.ai/image/{quote(clean_kw)}?"
-        f"model=zimage&"
+        f"model={current_model}&"
         f"seed={seed}&"
         f"width=1024&height=1024&"
         f"nologo=true&private=true"
@@ -152,10 +183,60 @@ async def process_photo(message: Message, state: FSMContext):
         img_url += f"&key={POLLINATIONS_KEY}"
 
     try:
-        await message.answer_photo(photo=img_url, caption="✨ Ваш візуальний проект (пріоритетна генерація)")
-    exceptException as e:
+        await state.update_data(last_img_kw=clean_kw)
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        builder = InlineKeyboardBuilder()
+        builder.button(text="🔄 Спробувати Turbo", callback_data="regen:turbo")
+        builder.button(text="✨ Спробувати Flux", callback_data="regen:flux")
+        builder.adjust(2)
+        
+        await message.answer_photo(
+            photo=img_url, 
+            caption=f"✨ Ваш візуальний проект (модель: {current_model})",
+            reply_markup=builder.as_markup()
+        )
+    except Exception as e:
         print(f"Image Error: {e}")
-        await message.answer(TEXTS['uk']['img_error'])
+        # Спробуємо надіслати повідомлення, що обрана модель може бути недоступна
+        await message.answer(
+            f"⚠️ Певні складнощі з моделлю <b>{current_model}</b>.\n"
+            "Спробуйте натиснути кнопку 🔄 Turbo нижче — вона найстабільніша!",
+            parse_mode="HTML"
+        )
+        # Все одно покажемо кнопки для перемикання
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        builder = InlineKeyboardBuilder()
+        builder.button(text="🔄 Спробувати Turbo", callback_data="regen:turbo")
+        builder.button(text="🎨 Спробувати Z-Image", callback_data="regen:zimage")
+        builder.adjust(2)
+        await message.answer("Оберіть іншу модель:", reply_markup=builder.as_markup())
+
+@dp.callback_query(F.data.startswith("regen:"))
+async def process_regen(callback: types.CallbackQuery, state: FSMContext):
+    model_id = callback.data.split(":")[1]
+    data = await state.get_data()
+    kw = data.get('last_img_kw', 'garden design')
+    
+    seed = random.randint(1, 999999)
+    img_url = (
+        f"https://gen.pollinations.ai/image/{quote(kw)}?"
+        f"model={model_id}&"
+        f"seed={seed}&"
+        f"width=1024&height=1024&"
+        f"nologo=true&private=true"
+    )
+    if POLLINATIONS_KEY:
+        img_url += f"&key={POLLINATIONS_KEY}"
+        
+    try:
+        await callback.message.answer_photo(
+            photo=img_url, 
+            caption=f"✨ Новий варіант (модель: {model_id})"
+        )
+        await callback.answer()
+    except Exception as e:
+        print(f"Regen Error: {e}")
+        await callback.answer("❌ Ця модель зараз перевантажена. Спробуйте іншу!", show_alert=True)
 
     await message.answer("💬 Ви можете написати мені, щоб уточнити деталі або змінити рослини!")
     await state.set_state(AgroForm.chat)
