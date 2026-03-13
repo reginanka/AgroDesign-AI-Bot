@@ -263,9 +263,9 @@ async def chat_handler(message: Message, state: FSMContext):
 
 # --- ЗАПУСК ---
 
-async def on_startup(bot_instance: Bot):
+async def on_startup(bot: Bot, *args, **kwargs):
     if RENDER_URL:
-        await bot_instance.set_webhook(f"{RENDER_URL}/webhook", drop_pending_updates=True)
+        await bot.set_webhook(f"{RENDER_URL}/webhook", drop_pending_updates=True)
 
 def main():
     if RENDER_URL:
