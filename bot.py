@@ -114,55 +114,57 @@ async def process_photo(message: types.Message, state: FSMContext):
     data = await state.get_data()
     status_msg = await message.answer(TEXTS[lang]['wait'])
 
-    # 1. Текстовий аналіз через Pollinations (з запасним варіантом)
+    # 1. Текстовий аналіз через Pollinations (Екстремально надійний метод)
     analysis_prompt = (
-        f"Ти — експерт-ботанік. Користувач у регіоні {data.get('region', 'Україна')}. "
-        f"Ґрунт: {data.get('soil')}, Світло: {data.get('sun')}, Полив: {data.get('watering')}. "
-        f"Запропонуй 5 реальних садових рослин для цих умов. "
-        f"Пиши виключно природною, професійною українською мовою без помилок і кальки. "
-        f"Форматуй як список з булітами '•', назви виділяй <b>. "
-        f"В кінці ОДИН рядок: PROMPT: та 3-5 англійських слів стилю саду."
+        f"Professional botanist advice for {data.get('region', 'Ukraine')}. "
+        f"Soil: {data.get('soil')}, Sun: {data.get('sun')}, Water: {data.get('watering')}. "
+        f"List 5 REAL plants in UKRAINIAN language only. Professional style. "
+        f"End with PROMPT: and 3-5 English garden keywords."
     )
     
-    analysis_text = "Не вдалося отримати аналіз."
-    image_keywords = "beautiful landscape garden"
+    analysis_text = "Не вдалося отримати аналіз. Можливо, сервіс перевантажений. Спробуйте ще раз через хвилину."
+    image_keywords = "beautiful garden design"
     
-    # Список моделей для спроби (якщо одна лежить, пробуємо іншу)
-    models_to_try = ["gemini-fast", "mistral-large", "openai"]
+    # Використовуємо найнадійніші моделі за твоїм монітором
+    models_to_try = [
+        "qwen-character", # №1 на моніторі (100% успіх, 0.8с)
+        "gemini-fast",   # №2 на моніторі
+        "openai"         # Запасний варіант
+    ]
     
     async with aiohttp.ClientSession() as session:
-        for model_name in models_to_try:
+        for model in models_to_try:
             try:
-                print(f"Trying text model: {model_name}...")
-                text_api_url = "https://text.pollinations.ai/"
-                payload = {
-                    "messages": [{"role": "user", "content": analysis_prompt}],
-                    "model": model_name,
-                    "key": POLLINATIONS_KEY
-                }
-                async with session.post(text_api_url, json=payload, timeout=25) as resp:
+                print(f"Trying model: {model}...")
+                # Використовуємо простий GET запит, він працює навіть коли POST "лежить"
+                encoded_prompt = quote(analysis_prompt)
+                text_url = f"https://text.pollinations.ai/{encoded_prompt}?model={model}&seed=42"
+                
+                async with session.get(text_url, timeout=20) as resp:
                     if resp.status == 200:
                         full_resp = await resp.text()
-                        if "PROMPT:" in full_resp:
-                            parts = full_resp.split("PROMPT:")
-                            analysis_text = parts[0].replace('*', '').strip()
-                            image_keywords = parts[1].strip()
-                        else:
-                            analysis_text = full_resp.replace('*', '').strip()
-                        print(f"Success with model: {model_name}")
-                        break
+                        if len(full_resp) > 10: # Перевірка чи відповідь не пуста
+                            if "PROMPT:" in full_resp:
+                                parts = full_resp.split("PROMPT:")
+                                analysis_text = parts[0].replace('*', '').strip()
+                                image_keywords = parts[1].strip()
+                            else:
+                                analysis_text = full_resp.replace('*', '').strip()
+                            print(f"SUCCESS with {model}!")
+                            break
                     else:
-                        print(f"Model {model_name} returned status {resp.status}")
+                        print(f"Model {model} failed with status {resp.status}")
             except Exception as e:
-                print(f"Error with model {model_name}: {e}")
+                print(f"Model {model} error: {e}")
                 continue
 
-    # Оновлюємо статус (якщо зовсім нічого не вийшло, залишиться текст помилки)
+    # Відправляємо результат
     try:
         await status_msg.edit_text(TEXTS[lang]['result_text'].format(analysis=analysis_text), parse_mode="HTML")
-    except Exception as e:
-        safe_text = re.sub(r'<[^>]+>', '', analysis_text)
-        await status_msg.edit_text(TEXTS[lang]['result_text'].format(analysis=safe_text))
+    except Exception:
+        # Якщо HTML битий (наприклад, ШІ вставив криві теги), шлемо без форматування
+        clean_text = re.sub(r'<[^>]+>', '', analysis_text)
+        await status_msg.edit_text(TEXTS[lang]['result_text'].format(analysis=clean_text))
 
     # 2. Генерація картинки (із спробами)
     img_prompt = f"Professional landscape garden design, {image_keywords}, photorealistic, 4k."
