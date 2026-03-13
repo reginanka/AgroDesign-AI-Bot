@@ -116,12 +116,15 @@ async def process_photo(message: types.Message, state: FSMContext):
 
     # 1. Текстовий аналіз через Pollinations
     analysis_prompt = (
-        f"You are a professional botanist and landscape designer. "
-        f"The user is in {data.get('region', 'Unknown region')}. Soil: {data.get('soil', 'Unknown')}, Light: {data.get('sun', 'Unknown')}, Watering: {data.get('watering', 'Unknown')}. "
-        f"Suggest 5 REAL, non-fictional plants that thrive in this specific climate and conditions. "
-        f"Format your response as a clean HTML list (use <b> and <i> tags if needed, no markdown asterisks). "
-        f"Don't use characters like '*'. Descriptions should be professional. Language: {lang}. "
-        f"At the very end, add EXACTLY this line: PROMPT: followed by 3-5 English keywords for a garden design with these plants."
+        f"Ти — професійний ботанік та ландшафтний дизайнер. "
+        f"Користувач знаходиться в регіоні: {data.get('region', 'Україна')}. "
+        f"Умови: ґрунт {data.get('soil')}, освітлення {data.get('sun')}, полив {data.get('watering')}. "
+        f"Запропонуй 5 РЕАЛЬНИХ садових рослин (дерева, кущі або квіти), які гарантовано виживуть у цьому кліматі. "
+        f"ВАЖЛИВО: Пиши виключно грамотною, живою українською мовою. "
+        f"Уникай кальки з англійської (наприклад, замість 'зимова тваринність' пиши 'зимостійкість'). "
+        f"Не вигадуй назви. Опис має бути коротким, але професійним. "
+        f"Форматуй як чистий список з булітами '•', використовуй <b> для назв. "
+        f"В самому кінці повідомлення додай ОДИН рядок: PROMPT: та 3-5 англійських слів для візуалізації цього саду."
     )
     
     analysis_full = "Не вдалося отримати аналіз."
@@ -133,7 +136,7 @@ async def process_photo(message: types.Message, state: FSMContext):
             text_api_url = "https://text.pollinations.ai/"
             payload = {
                 "messages": [{"role": "user", "content": analysis_prompt}],
-                "model": "openai",
+                "model": "gemini-fast", # Використовуємо потужнішу модель для української мови
                 "key": POLLINATIONS_KEY
             }
             async with session.post(text_api_url, json=payload, timeout=30) as resp:
