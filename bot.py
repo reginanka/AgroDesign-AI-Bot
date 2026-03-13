@@ -2,6 +2,7 @@ import os
 import asyncio
 import aiohttp
 import re
+import random
 from urllib.parse import quote
 from dotenv import load_dotenv
 
@@ -11,9 +12,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
-from aiogram.types import BufferedInputFile, Message
-from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
-from aiohttp import web
+from aiogram.types import Message
 
 # --- НАЛАШТУВАННЯ ---
 load_dotenv()
@@ -32,43 +31,43 @@ class AgroForm(StatesGroup):
     watering = State()
     region = State()
     photo = State()
-    chat = State() # Режим діалогу
+    chat = State()
 
 TEXTS = {
     'uk': {
         'start': "🌿 Вітаю в AgroDesign AI! Який у вас ґрунт?",
         'soil_opts': ["Пісок", "Чорнозем", "Глина", "Супісь"],
-        'sun_q': "Яке освітлення?",
+        'sun_q': "Яке освітлення на ділянці?",
         'sun_opts': ["Сонце", "Напівтінь", "Тінь"],
-        'water_q': "Як щодо поливу?",
+        'water_q': "Який плануєте полив?",
         'water_opts': ["Автоматичний", "Вручну", "Рідко"],
-        'region_q': "Вкажіть ваш регіон або країну (наприклад: Київська обл., Україна) 🌍",
-        'photo_q': "Надішліть фото ділянки 📸",
-        'wait': "⏳ ШІ аналізує дані та підбирає реальні рослини для вашого клімату...",
-        'result_text': "✅ <b>Рекомендовані рослини:</b>\n\n{analysis}\n\n🎨 Малюю дизайн...",
-        'generating_img': "🎨 Створюю візуалізацію вашого майбутнього саду...",
-        'img_error': "❌ Сервіс малювання тимчасово перевантажений, але ми можемо обговорити рослини в чаті!"
+        'region_q': "Вкажіть ваш регіон (напр. Київська обл.) 🌍",
+        'photo_q': "Надішліть фото під розробку 📸",
+        'wait': "⏳ Складаю ідеальний план саду...",
+        'result_text': "✅ <b>Рекомендовані рослини:</b>\n\n{analysis}",
+        'generating_img': "🎨 Малюю ваш дизайн, зачекайте кілька секунд...",
+        'img_error': "❌ Картинка малюється занадто довго. Спробуйте запитати бота ще раз у чаті!"
     },
     'en': {
-        'start': "🌿 Welcome to AgroDesign AI! What's your soil type?",
+        'start': "🌿 Welcome! What's your soil?",
         'soil_opts': ["Sand", "Black soil", "Clay", "Loam"],
-        'sun_q': "Lighting?",
-        'sun_opts': ["Full Sun", "Partial Shade", "Full Shade"],
+        'sun_q': "Sunlight?",
+        'sun_opts': ["Full Sun", "Partial Shade", "Shade"],
         'water_q': "Watering?",
-        'water_opts': ["Automatic", "Manual", "Rarely"],
-        'region_q': "Specify your region or country 🌍",
-        'photo_q': "Send a photo of your plot 📸",
-        'wait': "⏳ AI is choosing real plants for your climate...",
-        'result_text': "✅ <b>Recommended plants:</b>\n\n{analysis}\n\n🎨 Rendering design...",
-        'generating_img': "🎨 Generating garden visualization...",
-        'img_error': "❌ Image service is busy, but we can chat about the plants!"
+        'water_opts': ["Auto", "Manual", "Rarely"],
+        'region_q': "Region? 🌍",
+        'photo_q': "Send plot photo 📸",
+        'wait': "⏳ Analyzing...",
+        'result_text': "✅ <b>Plants:</b>\n\n{analysis}",
+        'generating_img': "🎨 Rendering...",
+        'img_error': "❌ Image error."
     }
 }
 
 def get_lang(message: Message):
     return 'uk' if message.from_user.language_code == 'uk' else 'en'
 
-# --- ОБРОБНИКИ FLOW ---
+# --- ОБРОБНИКИ ДАНИХ ---
 
 @dp.message(Command("start"))
 async def cmd_start(message: Message, state: FSMContext):
@@ -116,74 +115,68 @@ async def process_photo(message: Message, state: FSMContext):
     data = await state.get_data()
     status_msg = await message.answer(TEXTS[lang]['wait'])
 
-    # 1. Текстовий аналіз (Клімато-орієнтований)
-    analysis_prompt = (
-        f"Ти — експерт ландшафтний архітектор. Регіон: {data.get('region')}. "
-        f"Умови: ґрунт {data.get('soil')}, світло {data.get('sun')}, полив {data.get('watering')}. "
-        f"Запропонуй 5 рослин, які точно витримують морози до -20°C (Україна). "
-        f"Жодних тропічних рослин чи агав. Для кожної дай назву <b> та поясни чому (1 речення). "
-        f"Мова: УКРАЇНСЬКА. Формат: список •. В кінці: PROMPT: та 5 англійських слів."
+    # 1. Текстовий аналіз (Gemini через Новий API)
+    prompt = (
+        f"Ти - професійний ландшафтний дизайнер. Регіон: {data.get('region')}. "
+        f"Ґрунт {data.get('soil')}, світло {data.get('sun')}, полив {data.get('watering')}. "
+        f"Дай 5 рослин для відкритого ґрунту України (-20°C). Кожній дай опис. "
+        f"Мова: українська. Формат: список •. В кінці: PROMPT: та 5 слів англійською для саду."
     )
     
-    analysis_text = "Вибачте, сервіс аналізу зараз перевантажений."
-    image_keywords = "professional garden design"
-    
-    async with aiohttp.ClientSession() as session:
-        try:
+    analysis_text = "Вибачте, сервіс зайнятий."
+    img_kw = "beautiful garden"
+
+    try:
+        async with aiohttp.ClientSession() as session:
             headers = {"Authorization": f"Bearer {POLLINATIONS_KEY}"} if POLLINATIONS_KEY else {}
-            payload = {"model": "openai", "messages": [{"role": "user", "content": analysis_prompt}], "temperature": 0.3}
-            async with session.post("https://text.pollinations.ai/v1/chat/completions", json=payload, headers=headers, timeout=40) as resp:
-                if resp.status == 200:
-                    json_resp = await resp.json()
-                    full_resp = json_resp['choices'][0]['message']['content']
-                    if "PROMPT:" in full_resp:
-                        parts = full_resp.split("PROMPT:")
-                        analysis_text, image_keywords = parts[0].strip(), parts[1].strip()
+            payload = {"model": "openai", "messages": [{"role": "user", "content": prompt}]}
+            async with session.post("https://text.pollinations.ai/v1/chat/completions", json=payload, headers=headers) as r:
+                if r.status == 200:
+                    res = (await r.json())['choices'][0]['message']['content']
+                    if "PROMPT:" in res:
+                        parts = res.split("PROMPT:")
+                        analysis_text, img_kw = parts[0].strip(), parts[1].strip()
                     else:
-                        analysis_text = full_resp.strip()
-        except Exception as e: print(f"Speech error: {e}")
+                        analysis_text = res.strip()
+    except: pass
 
     await status_msg.edit_text(TEXTS[lang]['result_text'].format(analysis=analysis_text), parse_mode="HTML")
     await state.update_data(last_analysis=analysis_text)
-    await message.answer("💬 Ви можете написати мені, щоб змінити рослини або щось уточнити!")
+    
+    # 2. Миттєве малювання
+    await message.answer(TEXTS[lang]['generating_img'])
+    clean_kw = re.sub(r'[^a-zA-Z0-9\s]', '', img_kw)
+    seed = random.randint(1, 99999)
+    # Пряме посилання Телеграму - найшвидший метод
+    img_url = f"https://image.pollinations.ai/prompt/landscape%20garden%20design%20{quote(clean_kw)}?width=1024&height=1024&nologo=true&seed={seed}&model=flux"
+    
+    try:
+        await message.answer_photo(photo=img_url, caption="✨ Ось ваш візуальний проект саду")
+    except:
+        await message.answer(TEXTS[lang]['img_error'])
 
-    # 2. Картинка (Fallback моделі)
-    image_sent = False
-    for model in ["flux", "turbo", "any-dark"]:
-        if image_sent: break
-        try:
-            clean_kw = re.sub(r'[^a-zA-Z0-9\s,]', '', image_keywords)
-            url = f"https://image.pollinations.ai/prompt/landscape%20garden%20{quote(clean_kw)}?model={model}&width=1024&height=1024&nologo=true"
-            async with session.get(url, timeout=40) as r:
-                if r.status == 200:
-                    photo = BufferedInputFile(await r.read(), filename="design.jpg")
-                    await message.answer_photo(photo=photo, caption="🎨 Ваш дизайн")
-                    image_sent = True
-        except: continue
-
-    if not image_sent: await message.answer(TEXTS[lang]['img_error'])
+    await message.answer("💬 Ви можете написати мені, щоб змінити щось у проекті!")
     await state.set_state(AgroForm.chat)
 
 @dp.message(AgroForm.chat)
 async def chat_handler(message: Message, state: FSMContext):
     data = await state.get_data()
     prompt = (
-        f"Ти архітектор. Сад: {data.get('region')}, {data.get('soil')}. "
-        f"Минуле: {data.get('last_analysis')}. Запит: {message.text}. "
+        f"Ти ландшафтний архітектор. Умови: {data.get('region')}, {data.get('soil')}. "
+        f"Минуле: {data.get('last_analysis')}. Питання: {message.text}. "
         f"Відповідай коротко українською."
     )
-    async with aiohttp.ClientSession() as session:
-        headers = {"Authorization": f"Bearer {POLLINATIONS_KEY}"} if POLLINATIONS_KEY else {}
-        try:
+    try:
+        async with aiohttp.ClientSession() as session:
+            headers = {"Authorization": f"Bearer {POLLINATIONS_KEY}"} if POLLINATIONS_KEY else {}
             payload = {"model": "openai", "messages": [{"role": "user", "content": prompt}]}
             async with session.post("https://text.pollinations.ai/v1/chat/completions", json=payload, headers=headers) as r:
-                if r.status == 200:
-                    ans = (await r.json())['choices'][0]['message']['content']
-                    await message.answer(ans, parse_mode="HTML")
-                    await state.update_data(last_analysis=ans)
-        except: await message.answer("Помилка зв'язку.")
+                ans = (await r.json())['choices'][0]['message']['content']
+                await message.answer(ans, parse_mode="HTML")
+                await state.update_data(last_analysis=ans)
+    except: await message.answer("Сервіс тимчасово недоступний.")
 
-# --- ЗАПУСК ---
+# --- СТАРТ ---
 
 async def on_startup(bot: Bot):
     if RENDER_URL:
@@ -199,10 +192,11 @@ def main():
         dp.startup.register(on_startup)
         web.run_app(app, host="0.0.0.0", port=PORT)
     else:
-        async def run():
+        async def run_poll():
             await on_startup(bot)
             await dp.start_polling(bot)
-        asyncio.run(run())
+        asyncio.run(run_poll())
 
 if __name__ == "__main__":
     main()
+
