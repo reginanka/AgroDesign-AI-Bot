@@ -37,9 +37,10 @@ class AgroForm(StatesGroup):
     model = State()
 
 AVAILABLE_MODELS = {
-    "🎨 Z-Image Turbo": "zimage",
-    "🤖 GPT Image 1 Mini": "gptimage",
-    "⚡ FLUX Schnell": "flux"
+    "🎨 Z-Image (Найшвидша)": "zimage",
+    "🚀 Turbo Speed": "turbo",
+    "⚡ FLUX (Якість)": "flux",
+    "✨ Sana 4K": "sana"
 }
 
 TEXTS = {
@@ -224,7 +225,7 @@ async def process_photo(message: Message, state: FSMContext):
         
         # Кнопки для швидкого перемикання між обраними моделями
         builder.button(text="🎨 Z-Image", callback_data="regen:zimage")
-        builder.button(text="🤖 GPT-Img", callback_data="regen:gptimage")
+        builder.button(text="🚀 Turbo", callback_data="regen:turbo")
         builder.button(text="⚡ FLUX", callback_data="regen:flux")
         builder.adjust(3)
         
@@ -268,12 +269,13 @@ async def process_regen(callback: types.CallbackQuery, state: FSMContext):
         caption = f"✨ Новий варіант (модель: {model_id})"
         await callback.message.answer_photo(photo=img_url, caption=caption)
         await callback.answer()
+        
+        # Виправлено помилку: використовуємо callback.message замість message
+        await callback.message.answer("💬 Ви можете написати мені щось у чат, щоб уточнити деталі або змінити рослини!")
+        await state.set_state(AgroForm.chat)
     except Exception as e:
         print(f"Regen Error: {e}")
-        await callback.answer("❌ Ця модель зараз перевантажена. Спробуйте іншу!", show_alert=True)
-
-    await message.answer("💬 Ви можете написати мені, щоб уточнити деталі або змінити рослини!")
-    await state.set_state(AgroForm.chat)
+        await callback.answer("❌ Ця модель зараз недоступна. Спробуйте іншу!", show_alert=True)
 
 @dp.message(AgroForm.chat)
 async def chat_handler(message: Message, state: FSMContext):
